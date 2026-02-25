@@ -273,7 +273,7 @@
 <div class="container">
 
   <header>
-    <h1 class="title">APSCA <span>→ MailChimp</span> Cleaner</h1>
+    <h1 class="title">APSCA Auditors <span>→ MailChimp</span> Cleaner</h1>
     <p class="subtitle">Drop your export. Get a clean import file.</p>
   </header>
 
@@ -297,7 +297,7 @@
   <div style="margin-bottom: 24px;">
     <label style="display:block; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.1em; color:var(--mid); margin-bottom:8px;">File name for download</label>
     <div style="display:flex; align-items:center; gap:0; background:white; border:1px solid var(--light); border-radius:2px; overflow:hidden;">
-      <span style="padding:12px 14px; background:var(--light); font-size:0.75rem; color:var(--mid); white-space:nowrap; border-right:1px solid var(--light);" id="datePrefix"></span>
+      <span style="padding:12px 14px; background:var(--light); font-size:0.75rem; color:var(--ink); white-space:nowrap; border-right:1px solid var(--mid);" id="datePrefix"></span>
       <input type="text" id="fileNameInput" placeholder="e.g. APSCA Members" style="flex:1; border:none; outline:none; padding:12px 14px; font-family:'DM Mono',monospace; font-size:0.78rem; color:var(--ink); background:white;">
       <span style="padding:12px 14px; font-size:0.75rem; color:var(--mid); background:var(--light); border-left:1px solid var(--light);">.csv</span>
     </div>
@@ -361,7 +361,14 @@
   const dateStr = today.getFullYear() + '.' +
     String(today.getMonth()+1).padStart(2,'0') + '.' +
     String(today.getDate()).padStart(2,'0');
-  document.getElementById('datePrefix').textContent = dateStr + ' ';
+
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('datePrefix').textContent = dateStr + ' ';
+  });
+  // Also set immediately in case DOM is already ready
+  if (document.getElementById('datePrefix')) {
+    document.getElementById('datePrefix').textContent = dateStr + ' ';
+  }
 
   const dropZone = document.getElementById('dropZone');
   const fileInput = document.getElementById('fileInput');
@@ -412,24 +419,39 @@
     reader.readAsText(rawFile, 'utf-8');
   });
 
-  function parseCSVLine(line) {
-    const result = [];
+
+  // Proper CSV parser — handles multiline quoted fields correctly
+  function parseCSV(text) {
+    const rows = [];
+    let fields = [];
     let cur = '';
     let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
+
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      const next = text[i + 1];
+
       if (ch === '"') {
-        if (inQuotes && line[i+1] === '"') { cur += '"'; i++; }
+        if (inQuotes && next === '"') { cur += '"'; i++; }
         else inQuotes = !inQuotes;
       } else if (ch === ',' && !inQuotes) {
-        result.push(cur.trim());
-        cur = '';
+        fields.push(cur); cur = '';
+      } else if (ch === '\r' && next === '\n' && !inQuotes) {
+        i++;
+        fields.push(cur); cur = '';
+        if (fields.some(f => f !== '')) rows.push(fields);
+        fields = [];
+      } else if (ch === '\n' && !inQuotes) {
+        fields.push(cur); cur = '';
+        if (fields.some(f => f !== '')) rows.push(fields);
+        fields = [];
       } else {
         cur += ch;
       }
     }
-    result.push(cur.trim());
-    return result;
+    fields.push(cur);
+    if (fields.some(f => f !== '')) rows.push(fields);
+    return rows;
   }
 
   function cleanHtml(str) {
@@ -437,18 +459,16 @@
   }
 
   function processCSV(text) {
-    // Remove BOM
     text = text.replace(/^\uFEFF/, '');
-    const lines = text.split(/\r?\n/).filter(l => l.trim() !== '');
+    const allRows = parseCSV(text);
 
-    if (lines.length < 2) {
+    if (allRows.length < 2) {
       setStatus('File appears empty or invalid.', 'err');
       return;
     }
 
-    const headers = parseCSVLine(lines[0]).map(cleanHtml);
+    const headers = allRows[0].map(cleanHtml);
 
-    // Map headers (flexible matching)
     const col = name => {
       const idx = headers.findIndex(h => cleanHtml(h).toLowerCase().includes(name.toLowerCase()));
       return idx;
@@ -469,11 +489,9 @@
 
     const excludedDomains = ['theapsca.org', 'ksensetech.com'];
 
-    for (let i = 1; i < lines.length; i++) {
-      if (!lines[i].trim()) continue;
+    for (let i = 1; i < allRows.length; i++) {
+      const cols = allRows[i];
       total++;
-      const cols = parseCSVLine(lines[i]);
-
       const get = idx => (idx >= 0 && idx < cols.length) ? cols[idx].trim() : '';
 
       const prefEmail  = get(iPref);
@@ -483,7 +501,6 @@
       const memNumRaw  = get(iMemNum).replace(/[^0-9]/g, '');
       const memNum     = parseInt(memNumRaw, 10);
 
-      // Exclusion rules
       if (!memNumRaw || isNaN(memNum) || memNum < 21700000 || memNum > 32500000) {
         removed++; continue;
       }
@@ -506,7 +523,7 @@
         'First Name':         get(iFirst),
         'Last Name':          get(iLast),
         'APSCA Auditor Level': cleanHtml(get(iLevel)),
-        'Member Number':      memNumRaw,        // text format
+        'Member Number':      memNumRaw,
         'Exam Attempt':       get(iExam),
         'Country of Residence': cleanHtml(get(iCountry)),
       });
@@ -516,7 +533,6 @@
     document.getElementById('statKept').textContent    = kept;
     document.getElementById('statRemoved').textContent = removed;
 
-    // Preview
     previewBody.innerHTML = '';
     parsedOutput.slice(0, 10).forEach(row => {
       const tr = document.createElement('tr');
