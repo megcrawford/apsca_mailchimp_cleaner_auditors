@@ -284,6 +284,7 @@
       <li>Outputs: Email Address, First Name, Last Name, APSCA Auditor Level, Member Number (text), Exam Attempt, Country of Residence</li>
       <li>Excludes anyone with no Member Number, or number outside 21700000–32500000</li>
       <li>Excludes @theapsca.org and @ksensetech.com email addresses</li>
+      <li>Excludes anyone whose Membership Status is not "In Good Standing" or "Inactive"</li>
     </ul>
   </div>
 
@@ -461,6 +462,7 @@
     const iMemNum    = col('Mem #');
     const iLevel     = col('Auditor');
     const iExam      = col('Exam Attempt');
+    const iStatus    = col('Membership');
 
     let total = 0, kept = 0, removed = 0;
     parsedOutput = [];
@@ -490,6 +492,11 @@
 
       const emailDomain = email.split('@')[1] || '';
       if (excludedDomains.some(d => emailDomain.toLowerCase() === d)) {
+        removed++; continue;
+      }
+
+      const status = get(iStatus).toLowerCase();
+      if (status !== 'in good standing' && status !== 'inactive') {
         removed++; continue;
       }
 
